@@ -55,6 +55,16 @@ export default function Results() {
               <strong>{latestResult.quizTitle}</strong>
             </p>
             <p>
+              Сложность прохождения:{' '}
+              <strong>
+                {latestResult.playDifficulty === 'hard'
+                  ? 'Сложный'
+                  : latestResult.playDifficulty === 'medium'
+                  ? 'Средний'
+                  : 'Лёгкий'}
+              </strong>
+            </p>
+            <p>
               Счёт: {latestResult.score}/{latestResult.total} —{' '}
               {latestResult.percentage}%
             </p>

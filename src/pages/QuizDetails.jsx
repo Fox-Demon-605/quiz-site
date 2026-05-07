@@ -52,7 +52,7 @@ export default function QuizDetails() {
 
           <div className="details-list">
             <p>Время: {quiz.timeLimit} сек</p>
-            <p>Количество вопросов: {quiz.questions.length}</p>
+            <p>Количество вопросов в банке: {quiz.questions.length}</p>
           </div>
 
           <div className="section-head">

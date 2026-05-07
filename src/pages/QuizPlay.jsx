@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { quizzes } from '../data/quizzes'
 import ProgressBar from '../components/ProgressBar'
 import Timer from '../components/Timer'
+import QuestionCard from '../components/QuestionCard'
 import {
   clearQuizProgress,
   getQuizProgress,
@@ -10,24 +11,81 @@ import {
   saveResult,
 } from '../utils/storage'
 
+const playLevels = {
+  easy: {
+    label: 'Лёгкий',
+    count: 5,
+  },
+  medium: {
+    label: 'Средний',
+    count: 10,
+  },
+  hard: {
+    label: 'Сложный',
+    count: 15,
+  },
+}
+
+function shuffleArray(array) {
+  const copy = [...array]
+
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+
+  return copy
+}
+
 export default function QuizPlay() {
   const { id } = useParams()
   const navigate = useNavigate()
 
   const quiz = useMemo(() => quizzes.find((q) => q.id === id), [id])
 
-  const savedProgress = quiz ? getQuizProgress(quiz.id) : null
-
-  const [player, setPlayer] = useState(savedProgress?.player || '')
-  const [started, setStarted] = useState(savedProgress?.started || false)
-  const [currentQuestion, setCurrentQuestion] = useState(savedProgress?.currentQuestion || 0)
-  const [selected, setSelected] = useState(savedProgress?.selected || null)
-  const [answers, setAnswers] = useState(savedProgress?.answers || [])
-  const [score, setScore] = useState(savedProgress?.score || 0)
-  const [timeLeft, setTimeLeft] = useState(savedProgress?.timeLeft || quiz?.timeLimit || 0)
+  const [player, setPlayer] = useState('')
+  const [started, setStarted] = useState(false)
+  const [currentQuestion, setCurrentQuestion] = useState(0)
+  const [selected, setSelected] = useState(null)
+  const [answers, setAnswers] = useState([])
+  const [score, setScore] = useState(0)
+  const [timeLeft, setTimeLeft] = useState(0)
+  const [hasSavedProgress, setHasSavedProgress] = useState(false)
+  const [playDifficulty, setPlayDifficulty] = useState('easy')
+  const [activeQuestions, setActiveQuestions] = useState([])
 
   useEffect(() => {
     if (!quiz) return
+
+    const savedProgress = getQuizProgress(quiz.id)
+
+    if (savedProgress?.started) {
+      setHasSavedProgress(true)
+      setPlayer(savedProgress.player || '')
+      setStarted(true)
+      setCurrentQuestion(savedProgress.currentQuestion || 0)
+      setSelected(savedProgress.selected || null)
+      setAnswers(savedProgress.answers || [])
+      setScore(savedProgress.score || 0)
+      setTimeLeft(savedProgress.timeLeft ?? quiz.timeLimit)
+      setPlayDifficulty(savedProgress.playDifficulty || 'easy')
+      setActiveQuestions(savedProgress.activeQuestions || [])
+    } else {
+      setHasSavedProgress(false)
+      setPlayer('')
+      setStarted(false)
+      setCurrentQuestion(0)
+      setSelected(null)
+      setAnswers([])
+      setScore(0)
+      setTimeLeft(quiz.timeLimit)
+      setPlayDifficulty('easy')
+      setActiveQuestions([])
+    }
+  }, [quiz, id])
+
+  useEffect(() => {
+    if (!quiz || !started) return
 
     saveQuizProgress(quiz.id, {
       player,
@@ -37,8 +95,21 @@ export default function QuizPlay() {
       answers,
       score,
       timeLeft,
+      playDifficulty,
+      activeQuestions,
     })
-  }, [quiz, player, started, currentQuestion, selected, answers, score, timeLeft])
+  }, [
+    quiz,
+    player,
+    started,
+    currentQuestion,
+    selected,
+    answers,
+    score,
+    timeLeft,
+    playDifficulty,
+    activeQuestions,
+  ])
 
   useEffect(() => {
     if (!started || timeLeft <= 0) return
@@ -50,12 +121,6 @@ export default function QuizPlay() {
     return () => clearInterval(timer)
   }, [started, timeLeft])
 
-  useEffect(() => {
-    if (started && timeLeft <= 0) {
-      finishQuiz()
-    }
-  }, [timeLeft, started])
-
   if (!quiz) {
     return (
       <section className="section">
@@ -66,15 +131,70 @@ export default function QuizPlay() {
     )
   }
 
-  const question = quiz.questions[currentQuestion]
-  const isLastQuestion = currentQuestion === quiz.questions.length - 1
+  const questionsToUse = activeQuestions.length > 0 ? activeQuestions : []
+  const question = questionsToUse[currentQuestion]
+  const isLastQuestion = currentQuestion === questionsToUse.length - 1
+
+  const resetQuizState = () => {
+    setPlayer('')
+    setStarted(false)
+    setCurrentQuestion(0)
+    setSelected(null)
+    setAnswers([])
+    setScore(0)
+    setTimeLeft(quiz.timeLimit)
+    setHasSavedProgress(false)
+    setPlayDifficulty('easy')
+    setActiveQuestions([])
+  }
 
   const startQuiz = () => {
     if (!player.trim()) {
       alert('Введите имя игрока')
       return
     }
+
+    const requestedCount = playLevels[playDifficulty].count
+    const randomQuestions = shuffleArray(quiz.questions).slice(
+      0,
+      Math.min(requestedCount, quiz.questions.length)
+    )
+
+    clearQuizProgress(quiz.id)
+    setHasSavedProgress(false)
     setStarted(true)
+    setCurrentQuestion(0)
+    setSelected(null)
+    setAnswers([])
+    setScore(0)
+    setTimeLeft(quiz.timeLimit)
+    setActiveQuestions(randomQuestions)
+  }
+
+  const finalizeQuiz = (finalAnswers, finalScore, finalPlayer = player || 'Гость') => {
+    const totalQuestions = activeQuestions.length || 1
+
+    const result = {
+      quizId: quiz.id,
+      quizTitle: quiz.title,
+      player: finalPlayer,
+      score: finalScore,
+      total: totalQuestions,
+      percentage: Math.round((finalScore / totalQuestions) * 100),
+      date: new Date().toISOString(),
+      answers: finalAnswers,
+      playDifficulty,
+    }
+
+    saveResult(result)
+    clearQuizProgress(quiz.id)
+    resetQuizState()
+
+    navigate('/results', {
+      state: {
+        latestResult: result,
+      },
+    })
   }
 
   const handleNext = () => {
@@ -96,44 +216,15 @@ export default function QuizPlay() {
 
     const nextScore = isCorrect ? score + 1 : score
 
-    setAnswers(updatedAnswers)
-    setScore(nextScore)
-    setSelected(null)
-
-    if (!isLastQuestion) {
-      setCurrentQuestion((prev) => prev + 1)
+    if (isLastQuestion) {
+      finalizeQuiz(updatedAnswers, nextScore)
       return
     }
 
-    const percentage = Math.round((nextScore / quiz.questions.length) * 100)
-
-    saveResult({
-      quizId: quiz.id,
-      quizTitle: quiz.title,
-      player,
-      score: nextScore,
-      total: quiz.questions.length,
-      percentage,
-      date: new Date().toISOString(),
-      answers: updatedAnswers,
-    })
-
-    clearQuizProgress(quiz.id)
-
-    navigate('/results', {
-      state: {
-        latestResult: {
-          quizId: quiz.id,
-          quizTitle: quiz.title,
-          player,
-          score: nextScore,
-          total: quiz.questions.length,
-          percentage,
-          date: new Date().toISOString(),
-          answers: updatedAnswers,
-        },
-      },
-    })
+    setAnswers(updatedAnswers)
+    setScore(nextScore)
+    setSelected(null)
+    setCurrentQuestion((prev) => prev + 1)
   }
 
   const handleSkip = () => {
@@ -147,63 +238,21 @@ export default function QuizPlay() {
       },
     ]
 
-    setAnswers(updatedAnswers)
-    setSelected(null)
-
-    if (!isLastQuestion) {
-      setCurrentQuestion((prev) => prev + 1)
+    if (isLastQuestion) {
+      finalizeQuiz(updatedAnswers, score)
       return
     }
 
-    const percentage = Math.round((score / quiz.questions.length) * 100)
-
-    saveResult({
-      quizId: quiz.id,
-      quizTitle: quiz.title,
-      player,
-      score,
-      total: quiz.questions.length,
-      percentage,
-      date: new Date().toISOString(),
-      answers: updatedAnswers,
-    })
-
-    clearQuizProgress(quiz.id)
-
-    navigate('/results', {
-      state: {
-        latestResult: {
-          quizId: quiz.id,
-          quizTitle: quiz.title,
-          player,
-          score,
-          total: quiz.questions.length,
-          percentage,
-          date: new Date().toISOString(),
-          answers: updatedAnswers,
-        },
-      },
-    })
+    setAnswers(updatedAnswers)
+    setSelected(null)
+    setCurrentQuestion((prev) => prev + 1)
   }
 
-  const finishQuiz = () => {
-    const percentage = Math.round((score / quiz.questions.length) * 100)
-
-    saveResult({
-      quizId: quiz.id,
-      quizTitle: quiz.title,
-      player: player || 'Гость',
-      score,
-      total: quiz.questions.length,
-      percentage,
-      date: new Date().toISOString(),
-      answers,
-    })
-
-    clearQuizProgress(quiz.id)
-
-    navigate('/results')
-  }
+  useEffect(() => {
+    if (started && timeLeft <= 0) {
+      finalizeQuiz(answers, score, player || 'Гость')
+    }
+  }, [timeLeft])
 
   if (!started) {
     return (
@@ -212,9 +261,9 @@ export default function QuizPlay() {
           <div className="play-card">
             <h2>{quiz.title}</h2>
             <p>{quiz.longDescription}</p>
-            <p>Сложность: {quiz.difficulty}</p>
+            <p>Сложность квиза: {quiz.difficulty}</p>
             <p>Рейтинг: {quiz.rating}</p>
-            <p>Вопросов: {quiz.questions.length}</p>
+            <p>Всего вопросов в банке: {quiz.questions.length}</p>
             <p>Время: {quiz.timeLimit} сек</p>
 
             <input
@@ -225,8 +274,33 @@ export default function QuizPlay() {
               className="search-input"
             />
 
+            <div className="difficulty-picker">
+              <p className="small-note">Выбери сложность прохождения:</p>
+
+              <div className="filter-row">
+                <button
+                  className={`filter-btn ${playDifficulty === 'easy' ? 'active' : ''}`}
+                  onClick={() => setPlayDifficulty('easy')}
+                >
+                  Лёгкий — 5 вопросов
+                </button>
+                <button
+                  className={`filter-btn ${playDifficulty === 'medium' ? 'active' : ''}`}
+                  onClick={() => setPlayDifficulty('medium')}
+                >
+                  Средний — 10 вопросов
+                </button>
+                <button
+                  className={`filter-btn ${playDifficulty === 'hard' ? 'active' : ''}`}
+                  onClick={() => setPlayDifficulty('hard')}
+                >
+                  Сложный — 15 вопросов
+                </button>
+              </div>
+            </div>
+
             <button className="btn btn-primary full" onClick={startQuiz}>
-              {savedProgress?.started ? 'Продолжить квиз' : 'Начать квиз'}
+              {hasSavedProgress ? 'Начать заново' : 'Начать квиз'}
             </button>
           </div>
         </div>
@@ -240,31 +314,21 @@ export default function QuizPlay() {
         <div className="play-card">
           <div className="play-top">
             <Timer timeLeft={timeLeft} />
-            <ProgressBar current={currentQuestion} total={quiz.questions.length} />
+            <ProgressBar current={currentQuestion} total={questionsToUse.length} />
           </div>
 
-          <h2 className="question-title">{question.question}</h2>
+          <p className="small-note">
+            Режим: {playLevels[playDifficulty].label} · Вопросов: {questionsToUse.length}
+          </p>
 
-          <div className="options">
-            {question.options.map((option) => (
-              <button
-                key={option}
-                className={`option-btn ${selected === option ? 'selected' : ''}`}
-                onClick={() => setSelected(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-
-          <div className="card-actions">
-            <button className="btn btn-secondary full" onClick={handleSkip}>
-              Пропустить
-            </button>
-            <button className="btn btn-primary full" onClick={handleNext}>
-              {isLastQuestion ? 'Завершить' : 'Следующий вопрос'}
-            </button>
-          </div>
+          <QuestionCard
+            question={question}
+            selected={selected}
+            onSelect={setSelected}
+            onSkip={handleSkip}
+            onNext={handleNext}
+            isLastQuestion={isLastQuestion}
+          />
         </div>
       </div>
     </section>
